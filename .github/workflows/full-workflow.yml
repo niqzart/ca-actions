@@ -1,0 +1,174 @@
+name: Full python-check workflow
+
+on:
+  workflow_call:
+    inputs:
+      python_version:
+        type: string
+        required: true
+      package_manager:
+        type: string
+        default: pip
+      install_command:
+        type: string
+        default: pip install -r requirements.txt
+
+      lint_directory:
+        type: string
+        default: .
+      config_file:
+        type: string
+        default: pyproject.toml
+
+      pytest:
+        type: boolean
+        default: true
+      pytest_workdir:
+        type: string
+        default: .
+      pytest_tests:
+        type: string
+        default: tests
+      pytest_extra_params:
+        type: string
+
+      coverage:
+        type: boolean
+        default: true
+      coverage_path:
+        type: string
+        default: .
+      coverage_config_file:
+        type: string
+        required: false
+      coverage_extra_params:
+        type: string
+
+      flake8:
+        type: boolean
+        default: true
+      flake8_config_file:
+        type: string
+        required: false
+      flake8_extra_params:
+        type: string
+
+      isort:
+        type: boolean
+        default: true
+      isort_config_file:
+        type: string
+        required: false
+      isort_extra_params:
+        type: string
+
+      black:
+        type: boolean
+        default: true
+      black_extra_params:
+        type: string
+
+      mypy:
+        type: boolean
+        default: true
+      mypy_config_file:
+        type: string
+        required: false
+      mypy_extra_params:
+        type: string
+
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+
+    env:
+      CONFIG_PATH: ${GITHUB_WORKSPACE}/${{ inputs.config_file }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: ${{ inputs.package_manager }}
+
+      - name: Install package manager
+        if: inputs.package_manager != 'pip'
+        run: pip install ${{ inputs.package_manager }}
+
+      - id: install
+        name: Install Requirements
+        run: ${{ inputs.install_command }}
+
+      - name: Run pytest
+        if: inputs.pytest && !inputs.coverage
+        working-directory: ${{ inputs.pytest_workdir }}
+        run: >
+          pytest
+          ${{ inputs.pytest_tests }}
+          -p no:cacheprovider
+          ${{ inputs.pytest_extra_params }}
+
+      - name: Run pytest with coverage
+        if: inputs.pytest && inputs.coverage
+        working-directory: ${{ inputs.pytest_workdir }}
+        run: >
+          pytest
+          ${{ inputs.pytest_tests }}
+          -p no:cacheprovider
+          --cov=${GITHUB_WORKSPACE}/${{ inputs.pytest_workdir }}/${{ inputs.coverage_path }}
+          --cov-config=${{ inputs.coverage_config_file || env.CONFIG_PATH }}
+          --cov-fail-under=0
+          ${{ inputs.pytest_extra_params }}
+
+      - name: Report test coverage
+        if: inputs.coverage
+        working-directory: ${{ inputs.pytest_workdir }}
+        run: >
+          coverage
+          report
+          --rcfile=${{ inputs.coverage_config_file || env.CONFIG_PATH }}
+          ${{ inputs.coverage_extra_params }}
+
+      - id: flake8
+        if: inputs.flake8 && (success() || (failure() && steps.install.conclusion == 'success'))
+        name: Lint with flake8
+        run: >
+          flake8
+          ${{ inputs.lint_directory }}
+          --config=${{ inputs.flake8_config_file || env.CONFIG_PATH }}
+          ${{ inputs.flake8_extra_params }}
+
+      - id: isort
+        if: inputs.isort && (success() || (failure() && steps.install.conclusion == 'success'))
+        name: Check import ordering with isort
+        run: >
+          isort 
+          ${{ inputs.lint_directory }} 
+          --settings-file=${{ inputs.isort_config_file || env.CONFIG_PATH }}
+          --check 
+          --diff
+          ${{ inputs.isort_extra_params }}
+
+      - id: black
+        if: inputs.black && (success() || (failure() && steps.install.conclusion == 'success'))
+        name: Check formatting with black
+        run: >
+          black
+          ${{ inputs.lint_directory }}
+          --check
+          ${{ inputs.black_extra_params }}
+
+      - id: mypy
+        if: inputs.mypy && (success() || (failure() && steps.install.conclusion == 'success'))
+        name: Lint with mypy
+        run: >
+          mypy
+          ${{ inputs.lint_directory }}
+          --config-file=${{ inputs.mypy_config_file || env.CONFIG_PATH }}
+          ${{ inputs.mypy_extra_params }}
